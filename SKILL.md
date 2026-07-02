@@ -12,7 +12,8 @@ verified keyboard/clipboard fallback paths.
 
 ## Core Rules
 
-1. Use grid actions first for values: `sheet_read`, `sheet_fill`, `sheet_goto`.
+1. For reading values, prefer the ShareDB snapshot path when WebBridge can evaluate the POPO top
+   frame and fetch the office iframe HTML. Use grid actions next, then clipboard/UI fallback.
 2. If a tool returns `Unknown tool`, stop retrying it and switch to the UI fallback path.
 3. Never click hyperlink cells as a side effect. Use read/copy actions for link text; click links
    only when the user explicitly asks to open/check one.
@@ -38,6 +39,9 @@ verified keyboard/clipboard fallback paths.
     iframe, then verify single-key movement with CDP keyboard events. If CDP can move/select cells
     but `Ctrl+C` leaves the OS clipboard empty, escalate to OS-level keyboard input (`computer-use`,
     visible browser focus, or Windows SendKeys) before asking the user to copy manually.
+13. Treat OS-level copy as unverified until the agent proves it created the selection itself. If the
+    user is also working in POPO, do not use OS clipboard results as evidence unless a before/after
+    screenshot proves the selected range.
 
 ## Default Workflow
 
@@ -45,18 +49,20 @@ Use this flow for filling, supplementing, cleaning, or formatting a POPO sheet:
 
 1. **Orient:** open/reuse the POPO URL, confirm active sheet/tab, visible rows, editable state, and
    whether there is a header or section row.
-2. **Focus and verify control:** focus the office iframe, send one harmless arrow key, and verify the
+2. **Read via snapshot if possible:** use the ShareDB snapshot path from
+   `references/popo-sheet-reference.md` to fetch workbook JSON and extract rows/columns directly.
+3. **Focus and verify control:** focus the office iframe, send one harmless arrow key, and verify the
    active cell moves before trying range selection.
-3. **Read context:** inspect/read the header row and nearby completed rows; build a column map.
-4. **Infer format:** decide how target columns should look: raw text vs formula, hyperlink formula
+4. **Read context:** inspect/read the header row and nearby completed rows; build a column map.
+5. **Infer format:** decide how target columns should look: raw text vs formula, hyperlink formula
    vs URL, dropdown/tag cells, row height, borders, wrap, alignment, color, date/number format, and
    whether blanks should remain blank.
-5. **Plan exact target range:** confirm row/column anchors before modifying.
-6. **Fill values:** use `sheet_fill`/bulk paste when available; keep row order aligned.
-7. **Verify values:** use `verify:true`/`sheet_read` when available.
-8. **Match formatting:** apply inferred row height, column width, borders, wrap, alignment, and link
+6. **Plan exact target range:** confirm row/column anchors before modifying.
+7. **Fill values:** use `sheet_fill`/bulk paste when available; keep row order aligned.
+8. **Verify values:** use `verify:true`/`sheet_read` when available.
+9. **Match formatting:** apply inferred row height, column width, borders, wrap, alignment, and link
    style without waiting for a separate user reminder.
-9. **Final check:** screenshot the edited region and compare with nearby completed rows. Report data
+10. **Final check:** screenshot the edited region and compare with nearby completed rows. Report data
    filled, format matched, and any uncertainty.
 
 Ask only when two plausible interpretations would change business meaning or cause hard-to-reverse
@@ -69,7 +75,7 @@ use the fallback recipe.
 
 | Intent | Preferred action | Fallback |
 |---|---|---|
-| read range | `sheet_read range:"A1:T3"` | CDP select + OS-level `Ctrl+C` + clipboard TSV |
+| read range | ShareDB snapshot workbook JSON | `sheet_read`, then CDP/OS copy TSV |
 | fill values | `sheet_fill range:"D10" values:[[...]] verify:true` | set OS clipboard + OS-level `Ctrl+V` |
 | select cell/range | `sheet_goto range:"D10"` | keyboard addressing from A1 |
 | focus grid | `sheet_goto` or grid action focus | focus `document.querySelector('iframe').contentWindow.focus()` then CDP key test |

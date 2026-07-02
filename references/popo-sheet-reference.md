@@ -3,6 +3,7 @@
 ## Table Of Contents
 
 - Site Structure
+- ShareDB Snapshot Read Path
 - Addressing Internals
 - WebBridge Request Files On Windows
 - Keyboard And Clipboard Fallback
@@ -27,6 +28,77 @@
   inspection as blocked, not keyboard control as automatically blocked.
 - CDP keyboard movement and OS clipboard shortcuts can differ. If CDP arrows move the active cell but
   CDP `Ctrl+C` leaves the clipboard empty, keep the selection and switch to OS-level keyboard input.
+
+## ShareDB Snapshot Read Path
+
+Use this as the primary read path for POPO sheets when WebBridge can evaluate the top frame. It avoids
+mouse coordinates, user selection, and clipboard ambiguity.
+
+Verified facts:
+
+- The top frame can read the office iframe HTML with:
+  `fetch(document.querySelector('iframe').src, { credentials: 'include' })`.
+- `/api/admin/cowork/query-route?identity=<identity>` returns route metadata.
+- `/api/app/cowork/doc?identity=<identity>` returns document metadata.
+- The ShareDB WebSocket URL is:
+  `wss://office.netease.com/node/?identity=<identity>&serverType=GEZHI&source=POPO_DOC&wantCompress=false&lang=zh-CN`.
+- The first WebSocket message is `begin` and includes `collectionID` and `docID`.
+- Sending `{"a":"f","c":collectionID,"d":docID}` returns a full workbook snapshot.
+- In the returned workbook JSON, sheet cells are under `sheets[sheetId].cells`. Cell keys look like
+  `row,col`; text/value is usually in property `"0"`, hyperlink URL/display often uses `"0"` and
+  `"1"`, and style/format ids use keys such as `"100"`/`"101"`.
+
+Minimal browser-side probe:
+
+```javascript
+async function fetchPopoWorkbookSnapshot() {
+  const iframe = document.querySelector("iframe");
+  const iframeUrl = new URL(iframe.src);
+  const identity = iframeUrl.searchParams.get("identity");
+  const source = iframeUrl.searchParams.get("from") || "POPO_DOC";
+  const lang = iframeUrl.searchParams.get("popo_locale") || "zh-CN";
+  const wsUrl = iframeUrl.origin.replace("https", "wss") + "/node/?" +
+    new URLSearchParams({
+      identity,
+      serverType: "GEZHI",
+      source,
+      wantCompress: "false",
+      lang,
+    });
+
+  return await new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    const timer = setTimeout(() => reject(new Error("snapshot timeout")), 10000);
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.begin) {
+        ws.send(JSON.stringify({ a: "f", c: msg.collectionID, d: msg.docID }));
+      } else if (msg.a === "f") {
+        clearTimeout(timer);
+        ws.close();
+        resolve(msg.data.data);
+      }
+    };
+    ws.onerror = () => reject(new Error("snapshot websocket error"));
+  });
+}
+```
+
+Extraction rule:
+
+1. Read `data.tabs` and `data.sheets`.
+2. Select the active/requested sheet by tab id or title.
+3. Build a sparse table from `sheet.cells`: split each key at `,`, use `cell["0"]` as the visible
+   value, and use `cell["1"]` as link/formula metadata when present.
+4. Infer header columns from row 0 or the local section header, then match rows by the in-sheet name
+   column.
+
+Fallbacks:
+
+- If the WebSocket returns `MISS_DOC_INFO`, rebuild the URL with `identity`, `serverType=GEZHI`,
+  `source=POPO_DOC`, `wantCompress=false`, and `lang`.
+- If `export-file` returns `没有导出权限`, do not use export as the primary path.
+- If ShareDB snapshot fails, then use grid actions or clipboard TSV fallback.
 
 ## Addressing Internals
 
@@ -103,16 +175,22 @@ If CDP can move the active cell or extend a visible selection but `Get-Clipboard
 CDP `Ctrl+C`, do not ask the user to copy yet. Run this escalation order:
 
 1. Keep the current POPO selection visible.
-2. Bring the browser window to the foreground with `computer-use` or the available app/window tool.
-3. Send native OS `Ctrl+C`.
-4. Read `Get-Clipboard`; continue only when it contains non-empty TSV.
-5. If native `Ctrl+C` also fails, retry once after clicking/focusing the grid canvas.
-6. Ask the user to copy manually only after both CDP and OS-level copy paths fail.
+2. Bring the exact browser window to the foreground with `computer-use` or the available app/window
+   tool. On Windows, prefer the exact `MainWindowTitle`; partial titles can activate the wrong
+   process or leave focus behind.
+3. Re-focus the office iframe if WebBridge is still available.
+4. Send native OS `Ctrl+C`.
+5. Read `Get-Clipboard`; continue only when it contains non-empty TSV.
+6. If native `Ctrl+C` also fails, retry once after clicking/focusing the grid canvas.
+7. Ask the user to copy manually only after both CDP and OS-level copy paths fail.
 
 Windows fallback when no richer OS-input tool is available:
 
 ```powershell
+$title = 'exact browser MainWindowTitle here'
 $ws = New-Object -ComObject WScript.Shell
+$ws.AppActivate($title) | Out-Null
+Start-Sleep -Milliseconds 300
 $ws.SendKeys('^c')
 Start-Sleep -Milliseconds 300
 Get-Clipboard
@@ -128,6 +206,10 @@ $ws.SendKeys('^v')
 
 Use this only when the correct browser window and POPO grid already have focus. If focus is unclear,
 take a screenshot and re-focus the grid first.
+
+Do not claim OS-level copy succeeded unless the agent first proves it created the selected range.
+When the user is also working in the same POPO document, clipboard content may come from the user's
+current selection.
 
 ### Screenshot Path
 
