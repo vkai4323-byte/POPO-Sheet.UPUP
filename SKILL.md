@@ -30,6 +30,10 @@ paths.
    Re-read the affected range and split future writes around protected rows or columns.
 10. For name-matched bulk fills, use `scripts/name_match_tsv.py` after copying the POPO target block
     whenever source data and copied POPO TSV are available as local files.
+11. Do not ask the user to provide exact header names that are visible or copyable. Infer headers
+    from copied TSV, screenshots, nearby completed rows, source-file columns, and common aliases. Ask
+    the user for a wider copy or a business choice only after inference fails or multiple meanings
+    would change the filled result.
 
 ## Default Workflow
 
@@ -74,10 +78,14 @@ use the fallback recipe.
 Use this low-freedom workflow when filling values such as fan counts, homepages, IDs, notes, or
 status fields "after the corresponding talent/name":
 
-1. **Copy the real POPO target block first.** Include one header row, the in-sheet name column, and
-   every target column to fill. Do not use source-file row numbers as POPO row anchors.
-2. **Generate paste data and a report.** Run `scripts/name_match_tsv.py` with the source file and
-   copied POPO TSV. The script outputs a target-column TSV for paste and a match report.
+1. **Acquire the real POPO target block first.** Use available browser/computer controls to copy one
+   header row plus the in-sheet name column and the columns to fill. If automation cannot copy from
+   the canvas iframe, ask the user to copy a wider visible block; do not ask them to type the header
+   names manually.
+2. **Infer columns, then generate paste data and a report.** Run `scripts/name_match_tsv.py` with the
+   source file and copied POPO TSV. Use `--preset talent-basic` for达人/粉丝/主页/刊例价/截图 style
+   jobs unless the task names a narrower target. The script outputs a target-column TSV for paste and
+   a match report.
 3. **🔴 CHECKPOINT - inspect before writing.** Stop before paste if the report contains duplicate
    source names, duplicate POPO names, missing source rows that should be filled, or unexpected
    source-only names. Ask the user when those conflicts affect business meaning.
@@ -96,8 +104,7 @@ Script pattern:
 python scripts/name_match_tsv.py \
   --source talent_data_for_popo.md \
   --popo copied_popo_block.tsv \
-  --name-col 达人 \
-  --target-cols 粉丝量(w),主页链接 \
+  --preset talent-basic \
   --out-paste paste.tsv \
   --out-report match_report.tsv
 ```
@@ -108,6 +115,8 @@ Hard anti-patterns for this workflow:
 - Do not keep clicking fixed Y coordinates after pasted links change row height or scroll position.
 - Do not use screenshots as the only evidence for name matching.
 - Do not continue writing after a protected-cell toast or clipboard-denied error.
+- Do not ask the user "which header is X" when the header row can be copied, screenshotted, or
+  inferred from common aliases.
 
 ## Common Recipes
 

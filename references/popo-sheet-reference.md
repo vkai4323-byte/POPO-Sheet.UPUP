@@ -49,6 +49,10 @@ Before supplementing a sheet, inspect the local format contract from nearby comp
 Prefer the closest completed row in the same section. Ask only when two plausible styles would change
 business meaning or cause destructive edits.
 
+Header inference is the agent's responsibility. Do not ask the user to type exact header names when
+headers are visible, copied, or inferable from common aliases. If the copied region lacks headers,
+request a wider copy that includes the header row or inspect a screenshot/nearby completed rows.
+
 ## Name-Matched Bulk Fill
 
 This is the preferred path for tasks like "fill fan count and homepage behind the corresponding
@@ -71,10 +75,11 @@ A slow or incorrect run usually comes from one of these mistakes:
 1. Parse the source file into records keyed by visible talent/name. For duplicate names, keep all
    candidates and require another column or user confirmation before writing.
 2. Copy the live POPO region that contains the talent/name column and the target columns. Parse this
-   copied TSV as the authoritative row order.
-3. Identify target columns by header text and nearby completed rows. For example, "粉丝量(w)" and
-   "主页链接" should be mapped from the sheet, not assumed to be fixed columns unless the headers
-   confirm it.
+   copied TSV as the authoritative row order. If automation cannot copy from POPO, ask the user to
+   copy the visible block, not to type column names.
+3. Identify target columns by header text, aliases, screenshots, and nearby completed rows. For
+   example, `粉丝量(w)`/`粉丝数`, `主页链接`/`主页`, `刊例价`/`报价`, and
+   `平台价截图`/`报价截图` should be treated as aliases unless local evidence says otherwise.
 4. Run `scripts/name_match_tsv.py` when both source data and copied POPO TSV are available as local
    files. The script builds the planned output block from the copied POPO rows:
    - matched rows get source values,
@@ -243,7 +248,7 @@ Required inputs:
 
 - `--source`: Markdown table, TSV, or CSV source file.
 - `--popo`: TSV copied from POPO with one header row.
-- `--target-cols`: comma-separated POPO target column headers.
+- `--target-cols`: comma-separated POPO target column headers, only when exact targets are known.
 - `--out-paste`: paste TSV path.
 - `--out-report`: match report TSV path.
 
@@ -251,6 +256,8 @@ Optional inputs:
 
 - `--name-col`: shared name column header.
 - `--source-name-col` and `--popo-name-col`: separate name headers when the two files differ.
+- `--preset talent-basic`: auto-detect common talent columns such as name, fans, homepage, rate, and
+  rate screenshot. Use this before asking the user for header names.
 - `--source-map`: comma-separated `POPO_COL=SOURCE_COL` overrides when target column names differ.
 
 Outputs:

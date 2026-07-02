@@ -18,7 +18,16 @@ import re
 from pathlib import Path
 
 
-NAME_CANDIDATES = ("达人", "达人名称", "博主", "姓名", "昵称", "name", "talent")
+NAME_CANDIDATES = ("达人", "达人名称", "博主", "姓名", "昵称", "账号", "达人名", "name", "talent")
+
+PRESET_TARGETS = {
+    "talent-basic": [
+        ("fans", ("粉丝量(w)", "粉丝量", "粉丝", "达人粉丝", "粉丝数", "fans")),
+        ("homepage", ("主页链接", "达人主页", "首页链接", "主页", "链接", "homepage", "url")),
+        ("rate", ("刊例价", "报价", "平台报价", "视频报价", "21-60s报价", "21-60s视频报价", "rate", "price")),
+        ("rate_screenshot", ("平台价截图", "报价截图", "刊例截图", "星图报价截图", "截图", "screenshot")),
+    ],
+}
 
 
 def normalize_name(value: str) -> str:
@@ -60,7 +69,7 @@ def parse_table(path: str) -> list[dict[str, str]]:
     return parse_delimited(text, ",")
 
 
-def find_col(rows: list[dict[str, str]], requested: str | None) -> str:
+def find_col(rows: list[dict[str, str]], requested: str | None, candidates: tuple[str, ...] = NAME_CANDIDATES) -> str:
     if not rows:
         raise SystemExit("Input table has no rows")
     columns = list(rows[0].keys())
@@ -69,18 +78,63 @@ def find_col(rows: list[dict[str, str]], requested: str | None) -> str:
             return requested
         raise SystemExit(f"Column not found: {requested}. Available: {', '.join(columns)}")
     normalized = {normalize_name(col): col for col in columns}
-    for candidate in NAME_CANDIDATES:
+    for candidate in candidates:
         key = normalize_name(candidate)
         if key in normalized:
             return normalized[key]
     raise SystemExit(f"Name column not found. Available: {', '.join(columns)}")
 
 
-def split_targets(value: str) -> list[str]:
+def find_optional_col(rows: list[dict[str, str]], candidates: tuple[str, ...]) -> str | None:
+    if not rows:
+        return None
+    normalized = {normalize_name(col): col for col in rows[0].keys()}
+    for candidate in candidates:
+        key = normalize_name(candidate)
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
+def split_targets(value: str | None) -> list[str]:
+    if value is None:
+        return []
     targets = [part.strip() for part in value.split(",") if part.strip()]
-    if not targets:
-        raise SystemExit("--target-cols is required")
     return targets
+
+
+def resolve_targets(popo_rows: list[dict[str, str]], explicit_targets: str | None, preset: str | None) -> list[str]:
+    targets = split_targets(explicit_targets)
+    if targets:
+        return targets
+    if not preset:
+        raise SystemExit("--target-cols is required unless --preset is supplied")
+    if preset not in PRESET_TARGETS:
+        raise SystemExit(f"Unknown preset: {preset}. Available: {', '.join(PRESET_TARGETS)}")
+    resolved: list[str] = []
+    for _, candidates in PRESET_TARGETS[preset]:
+        col = find_optional_col(popo_rows, candidates)
+        if col:
+            resolved.append(col)
+    if not resolved:
+        available = ", ".join(popo_rows[0].keys()) if popo_rows else ""
+        raise SystemExit(f"Preset {preset} found no target columns. Available: {available}")
+    return resolved
+
+
+def source_col_for_target(source_row: dict[str, str], target: str, source_map: dict[str, str], preset: str | None) -> str | None:
+    requested = source_map.get(target, target)
+    if requested in source_row:
+        return requested
+    if preset and preset in PRESET_TARGETS:
+        target_key = normalize_name(target)
+        for _, candidates in PRESET_TARGETS[preset]:
+            candidate_keys = {normalize_name(candidate) for candidate in candidates}
+            if target_key in candidate_keys:
+                found = find_optional_col([source_row], candidates)
+                if found:
+                    return found
+    return None
 
 
 def parse_source_map_arg(value: str | None) -> dict[str, str]:
@@ -114,7 +168,8 @@ def main() -> int:
     parser.add_argument("--name-col", help="Name column header used in both files when shared")
     parser.add_argument("--source-name-col", help="Name column header in source file")
     parser.add_argument("--popo-name-col", help="Name column header in copied POPO TSV")
-    parser.add_argument("--target-cols", required=True, help="Comma-separated POPO target columns")
+    parser.add_argument("--target-cols", help="Comma-separated POPO target columns")
+    parser.add_argument("--preset", choices=sorted(PRESET_TARGETS), help="Auto-detect common target columns")
     parser.add_argument("--source-map", help="Comma-separated POPO_COL=SOURCE_COL overrides")
     parser.add_argument("--out-paste", required=True)
     parser.add_argument("--out-report", required=True)
@@ -122,7 +177,7 @@ def main() -> int:
 
     source_rows = parse_table(args.source)
     popo_rows = parse_table(args.popo)
-    target_cols = split_targets(args.target_cols)
+    target_cols = resolve_targets(popo_rows, args.target_cols, args.preset)
     source_map = parse_source_map_arg(args.source_map)
 
     source_name_col = find_col(source_rows, args.source_name_col or args.name_col)
@@ -153,8 +208,8 @@ def main() -> int:
         for target in target_cols:
             if target not in popo_row:
                 raise SystemExit(f"POPO target column not found: {target}")
-            source_col = source_map.get(target, target)
-            if matched is not None and source_col in matched:
+            source_col = source_col_for_target(matched, target, source_map, args.preset) if matched else None
+            if matched is not None and source_col:
                 out_row.append(matched.get(source_col, ""))
             else:
                 out_row.append(popo_row.get(target, ""))
@@ -193,7 +248,8 @@ def main() -> int:
     source_only_count = sum(1 for row in report_rows if row["status"] == "source_only")
     print(
         f"matched={matched_count} conflicts={conflict_count} "
-        f"missing_source={missing_count} source_only={source_only_count}"
+        f"missing_source={missing_count} source_only={source_only_count} "
+        f"target_cols={','.join(target_cols)}"
     )
     return 0
 
