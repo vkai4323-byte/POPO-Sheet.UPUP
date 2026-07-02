@@ -4,6 +4,8 @@
 
 - Site Structure
 - Addressing Internals
+- WebBridge Request Files On Windows
+- Keyboard And Clipboard Fallback
 - Format Inference Checklist
 - Name-Matched Bulk Fill
 - Menu Evidence From Live POPO Sheet
@@ -21,16 +23,83 @@
 - Top-frame `evaluate` cannot read cell DOM or iframe internals because of cross-origin restrictions.
 - Cell content can be read structurally through clipboard TSV when grid actions implement select +
   `Ctrl+C`.
+- The iframe can still receive focus and keyboard input in verified WebBridge/CDP setups. Treat DOM
+  inspection as blocked, not keyboard control as automatically blocked.
 
 ## Addressing Internals
 
 There is no reliable O(1) name-box addressing exposed through WebBridge. The reliable path is:
 
-1. Focus the grid from the far-left row-number gutter, not a data cell.
-2. `Control+Home` to A1.
-3. Arrow-step to the anchor and extend the selection.
+1. Focus the office iframe: `document.querySelector('iframe').contentWindow.focus()`.
+2. Send one harmless CDP key such as `ArrowLeft` or `ArrowUp`.
+3. Verify the active cell moved. If it did not move, re-focus the iframe and retry once.
+4. Use `Control+Home` to A1.
+5. Arrow-step to the anchor and extend the selection.
 
 This is why far ranges are slower and why row/column header operations should target headers/gutters.
+
+## WebBridge Request Files On Windows
+
+When posting JSON to a local WebBridge daemon from PowerShell, write request-body files as UTF-8
+without BOM. PowerShell/.NET `Encoding.UTF8` can add a BOM on older runtimes, and WebBridge may fail
+with:
+
+```text
+invalid character 'ï' looking for beginning of value
+```
+
+Use:
+
+```powershell
+$enc = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($tmp, $json, $enc)
+curl.exe -s -X POST $url -H 'Content-Type: application/json' --data-binary "@$tmp"
+```
+
+Do not use shell quoting for large JSON payloads. Write the JSON file, send it with
+`--data-binary`, and inspect the response body before continuing.
+
+## Keyboard And Clipboard Fallback
+
+Use this path when sheet actions are unavailable but WebBridge/CDP keyboard events can reach the
+focused office iframe.
+
+### Focus Test
+
+1. Focus the iframe with top-frame JavaScript:
+   `document.querySelector('iframe').contentWindow.focus()`.
+2. Send `ArrowLeft` or `ArrowUp` via CDP `Input.dispatchKeyEvent`.
+3. Screenshot or copy a small range to confirm active-cell movement before starting a long sequence.
+
+### Modifier Keys
+
+For range selection and clipboard shortcuts, prefer hold/release events over `modifiers` bitmasks.
+POPO may ignore `modifiers: 8` for `Shift+ArrowDown` even when single arrow keys work.
+
+Reliable pattern:
+
+```text
+Shift keyDown
+ArrowDown keyDown/keyUp repeated N times
+Shift keyUp
+```
+
+Use the same style for `Ctrl+C`, `Ctrl+V`, `Ctrl+Home`, and `Ctrl+Z`:
+
+```text
+Control keyDown
+C keyDown/keyUp
+Control keyUp
+```
+
+After any select + `Ctrl+C`, read the OS clipboard and verify it contains non-empty TSV with the
+expected row/column shape. Do not proceed to matching or filling from an empty clipboard.
+
+### Screenshot Path
+
+If a screenshot action accepts a custom `path` but returns a different default temp path, trust the
+returned response path. Treat custom `path` as best-effort only unless the daemon version confirms
+support for it.
 
 ## Format Inference Checklist
 
@@ -239,6 +308,8 @@ Prefer keyboard/header selection over blind pixel clicks.
 - Clipboard-backed actions temporarily modify the OS clipboard; robust wrappers should restore it.
 - Values containing tab/newline can split TSV blocks and misalign paste.
 - Visual formatting needs screenshot verification; `sheet_read` verifies only content.
+- A keyboard sequence is not proven until select + `Ctrl+C` produces a non-empty TSV from the OS
+  clipboard.
 
 ## Bundled Script Contract
 
@@ -276,13 +347,14 @@ Outputs:
 
 ## Engine API Investigation
 
-Direct engine access is currently blocked through Kimi WebBridge:
+Direct engine access is currently blocked through Kimi WebBridge, but keyboard control may still work:
 
 - The real grid engine runs in the `office.netease.com` child iframe.
 - Cross-frame JS access throws `SecurityError`.
 - WebBridge `evaluate` runs in the top frame only.
-- CDP target/frame access is restricted.
+- CDP target/frame access may be restricted for DOM inspection, but `Input.dispatchKeyEvent` can
+  control the focused iframe in verified setups.
 - Loading the office iframe URL standalone renders blank.
 
-Production path remains grid actions plus verified UI recipes unless the transport gains frame-targeted
-execution or a stable POPO postMessage/API path.
+Production path remains grid actions plus iframe-focus keyboard fallback, verified by copied TSV,
+unless the transport gains frame-targeted execution or a stable POPO postMessage/API path.

@@ -7,8 +7,8 @@ description: Operate NetEase POPO / office.netease.com online spreadsheets (docs
 
 Use this skill for NetEase POPO online spreadsheets in the user's real browser. POPO grids are
 canvas-rendered inside a cross-origin `office.netease.com` iframe, so normal DOM cell selectors do
-not work. Prefer dedicated sheet actions when available; otherwise use the verified UI fallback
-paths.
+not work. Prefer dedicated sheet actions when available; otherwise focus the office iframe and use
+verified keyboard/clipboard fallback paths.
 
 ## Core Rules
 
@@ -34,6 +34,9 @@ paths.
     from copied TSV, screenshots, nearby completed rows, source-file columns, and common aliases. Ask
     the user for a wider copy or a business choice only after inference fails or multiple meanings
     would change the filled result.
+12. Do not assume the cross-origin canvas iframe is uncontrollable. First focus the `office.netease.com`
+    iframe, then verify single-key movement with CDP keyboard events. Only ask the user to copy
+    manually after iframe focus plus keyboard-copy verification fails.
 
 ## Default Workflow
 
@@ -41,16 +44,18 @@ Use this flow for filling, supplementing, cleaning, or formatting a POPO sheet:
 
 1. **Orient:** open/reuse the POPO URL, confirm active sheet/tab, visible rows, editable state, and
    whether there is a header or section row.
-2. **Read context:** inspect/read the header row and nearby completed rows; build a column map.
-3. **Infer format:** decide how target columns should look: raw text vs formula, hyperlink formula
+2. **Focus and verify control:** focus the office iframe, send one harmless arrow key, and verify the
+   active cell moves before trying range selection.
+3. **Read context:** inspect/read the header row and nearby completed rows; build a column map.
+4. **Infer format:** decide how target columns should look: raw text vs formula, hyperlink formula
    vs URL, dropdown/tag cells, row height, borders, wrap, alignment, color, date/number format, and
    whether blanks should remain blank.
-4. **Plan exact target range:** confirm row/column anchors before modifying.
-5. **Fill values:** use `sheet_fill`/bulk paste when available; keep row order aligned.
-6. **Verify values:** use `verify:true`/`sheet_read` when available.
-7. **Match formatting:** apply inferred row height, column width, borders, wrap, alignment, and link
+5. **Plan exact target range:** confirm row/column anchors before modifying.
+6. **Fill values:** use `sheet_fill`/bulk paste when available; keep row order aligned.
+7. **Verify values:** use `verify:true`/`sheet_read` when available.
+8. **Match formatting:** apply inferred row height, column width, borders, wrap, alignment, and link
    style without waiting for a separate user reminder.
-8. **Final check:** screenshot the edited region and compare with nearby completed rows. Report data
+9. **Final check:** screenshot the edited region and compare with nearby completed rows. Report data
    filled, format matched, and any uncertainty.
 
 Ask only when two plausible interpretations would change business meaning or cause hard-to-reverse
@@ -66,6 +71,7 @@ use the fallback recipe.
 | read range | `sheet_read range:"A1:T3"` | keyboard select + copy TSV |
 | fill values | `sheet_fill range:"D10" values:[[...]] verify:true` | trusted paste block |
 | select cell/range | `sheet_goto range:"D10"` | keyboard addressing from A1 |
+| focus grid | `sheet_goto` or grid action focus | focus `document.querySelector('iframe').contentWindow.focus()` then CDP key test |
 | select rows | `sheet_select_rows rows:"2:11"` | drag/select left row-number gutter |
 | select columns | `sheet_select_columns columns:"J:J"` | click/drag column-letter header |
 | set row height | `sheet_set_row_height rows:"2:11" height:60` | row gutter right-click -> `设置行高` |
@@ -130,6 +136,10 @@ Hard anti-patterns for this workflow:
 - Clipboard preflight: before UI paste fallback, confirm browser clipboard permission by writing and
   reading a harmless sentinel. If permission fails, ask the user to allow clipboard access before any
   data-changing operation.
+- WebBridge request files on Windows: write JSON bodies as UTF-8 **without BOM** before calling
+  `curl.exe`; a BOM can produce `invalid character 'ï' looking for beginning of value`.
+- Keyboard selection: for `Shift`/`Ctrl` combinations, send modifier `keyDown`, then the normal key
+  sequence, then modifier `keyUp`. Do not rely on `modifiers` bitmasks for POPO range selection.
 - Undo a mistake: use `Control+Z` immediately, then re-read/re-screenshot before retrying.
 
 ## Verified Formatting Paths
@@ -161,6 +171,7 @@ cannot be verified by `sheet_read`.
 
 ## More Detail
 
-For POPO internals, menu evidence, format inference checklist, name-matched bulk-fill failure modes,
-pixel-click conversion, in-place edit mode, side effects, and blocked engine API notes, read
+For POPO internals, menu evidence, format inference checklist, keyboard/clipboard fallback,
+name-matched bulk-fill failure modes, pixel-click conversion, in-place edit mode, side effects, and
+blocked engine API notes, read
 `references/popo-sheet-reference.md` only when needed.
