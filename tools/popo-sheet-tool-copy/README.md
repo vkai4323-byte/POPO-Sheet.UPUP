@@ -9,6 +9,8 @@ the existing skill package.
 - Read POPO workbook data through the verified ShareDB snapshot path.
 - Resolve internal `rowId,colId` cells by in-sheet names.
 - Write simple text/link cells through the verified ShareDB JSON0 op path.
+- Apply basic layout formatting through verified ShareDB JSON0 ops: row heights, column widths,
+  merged spans, cell text, and existing style ids.
 - Verify writes through a fresh snapshot, not repeated scroll screenshots.
 - Save WebBridge responses and screenshots as stable diagnostic artifacts.
 - Provide a thin routing skill that tells Codex when and how to call the MCP tools.
@@ -32,6 +34,7 @@ the skill triggers, then the agent calls the MCP tools instead of rewriting frag
 - `popo_probe_write_channel`
 - `popo_write_by_name`
 - `popo_write_from_source_file`
+- `popo_apply_basic_format`
 - `popo_screenshot_checkpoint`
 
 ## Direct Test Mode
@@ -58,3 +61,10 @@ The MCP config is in `.mcp.json`. This copy is not installed into a marketplace 
 
 For data correctness, prefer ShareDB snapshot verification. Screenshots are diagnostic and
 presentation evidence only.
+
+For visual formatting, use both:
+
+- snapshot verification for structural state such as `rowHeights`, `colWidths`, `spans`, and
+  cell style ids;
+- screenshot verification for rendered appearance. Merged-cell rendering may require a page reload
+  after a ShareDB op.
