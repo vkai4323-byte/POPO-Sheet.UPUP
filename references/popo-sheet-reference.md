@@ -25,6 +25,8 @@
   `Ctrl+C`.
 - The iframe can still receive focus and keyboard input in verified WebBridge/CDP setups. Treat DOM
   inspection as blocked, not keyboard control as automatically blocked.
+- CDP keyboard movement and OS clipboard shortcuts can differ. If CDP arrows move the active cell but
+  CDP `Ctrl+C` leaves the clipboard empty, keep the selection and switch to OS-level keyboard input.
 
 ## Addressing Internals
 
@@ -94,6 +96,38 @@ Control keyUp
 
 After any select + `Ctrl+C`, read the OS clipboard and verify it contains non-empty TSV with the
 expected row/column shape. Do not proceed to matching or filling from an empty clipboard.
+
+### Empty Clipboard After CDP Copy
+
+If CDP can move the active cell or extend a visible selection but `Get-Clipboard` length is `0` after
+CDP `Ctrl+C`, do not ask the user to copy yet. Run this escalation order:
+
+1. Keep the current POPO selection visible.
+2. Bring the browser window to the foreground with `computer-use` or the available app/window tool.
+3. Send native OS `Ctrl+C`.
+4. Read `Get-Clipboard`; continue only when it contains non-empty TSV.
+5. If native `Ctrl+C` also fails, retry once after clicking/focusing the grid canvas.
+6. Ask the user to copy manually only after both CDP and OS-level copy paths fail.
+
+Windows fallback when no richer OS-input tool is available:
+
+```powershell
+$ws = New-Object -ComObject WScript.Shell
+$ws.SendKeys('^c')
+Start-Sleep -Milliseconds 300
+Get-Clipboard
+```
+
+For paste, reverse the flow:
+
+```powershell
+Set-Clipboard -Value $tsv
+$ws = New-Object -ComObject WScript.Shell
+$ws.SendKeys('^v')
+```
+
+Use this only when the correct browser window and POPO grid already have focus. If focus is unclear,
+take a screenshot and re-focus the grid first.
 
 ### Screenshot Path
 
@@ -310,6 +344,8 @@ Prefer keyboard/header selection over blind pixel clicks.
 - Visual formatting needs screenshot verification; `sheet_read` verifies only content.
 - A keyboard sequence is not proven until select + `Ctrl+C` produces a non-empty TSV from the OS
   clipboard.
+- Empty clipboard after CDP `Ctrl+C` is a clipboard-delivery failure, not proof that the selected
+  POPO range is unusable. Try OS-level copy before involving the user.
 
 ## Bundled Script Contract
 

@@ -35,8 +35,9 @@ verified keyboard/clipboard fallback paths.
     the user for a wider copy or a business choice only after inference fails or multiple meanings
     would change the filled result.
 12. Do not assume the cross-origin canvas iframe is uncontrollable. First focus the `office.netease.com`
-    iframe, then verify single-key movement with CDP keyboard events. Only ask the user to copy
-    manually after iframe focus plus keyboard-copy verification fails.
+    iframe, then verify single-key movement with CDP keyboard events. If CDP can move/select cells
+    but `Ctrl+C` leaves the OS clipboard empty, escalate to OS-level keyboard input (`computer-use`,
+    visible browser focus, or Windows SendKeys) before asking the user to copy manually.
 
 ## Default Workflow
 
@@ -68,8 +69,8 @@ use the fallback recipe.
 
 | Intent | Preferred action | Fallback |
 |---|---|---|
-| read range | `sheet_read range:"A1:T3"` | keyboard select + copy TSV |
-| fill values | `sheet_fill range:"D10" values:[[...]] verify:true` | trusted paste block |
+| read range | `sheet_read range:"A1:T3"` | CDP select + OS-level `Ctrl+C` + clipboard TSV |
+| fill values | `sheet_fill range:"D10" values:[[...]] verify:true` | set OS clipboard + OS-level `Ctrl+V` |
 | select cell/range | `sheet_goto range:"D10"` | keyboard addressing from A1 |
 | focus grid | `sheet_goto` or grid action focus | focus `document.querySelector('iframe').contentWindow.focus()` then CDP key test |
 | select rows | `sheet_select_rows rows:"2:11"` | drag/select left row-number gutter |
@@ -84,10 +85,11 @@ use the fallback recipe.
 Use this low-freedom workflow when filling values such as fan counts, homepages, IDs, notes, or
 status fields "after the corresponding talent/name":
 
-1. **Acquire the real POPO target block first.** Use available browser/computer controls to copy one
-   header row plus the in-sheet name column and the columns to fill. If automation cannot copy from
-   the canvas iframe, ask the user to copy a wider visible block; do not ask them to type the header
-   names manually.
+1. **Acquire the real POPO target block first.** Use available sheet, browser, CDP, or OS-level
+   controls to copy one header row plus the in-sheet name column and the columns to fill. If CDP
+   navigation works but clipboard length is `0`, switch to OS-level `Ctrl+C` before asking the user.
+   Ask the user to copy a wider visible block only after automated copy paths fail; do not ask them
+   to type the header names manually.
 2. **Infer columns, then generate paste data and a report.** Run `scripts/name_match_tsv.py` with the
    source file and copied POPO TSV. Use `--preset talent-basic` for达人/粉丝/主页/刊例价/截图 style
    jobs unless the task names a narrower target. The script outputs a target-column TSV for paste and
@@ -140,6 +142,9 @@ Hard anti-patterns for this workflow:
   `curl.exe`; a BOM can produce `invalid character 'ï' looking for beginning of value`.
 - Keyboard selection: for `Shift`/`Ctrl` combinations, send modifier `keyDown`, then the normal key
   sequence, then modifier `keyUp`. Do not rely on `modifiers` bitmasks for POPO range selection.
+- Clipboard escalation: if CDP `Ctrl+C` returns empty clipboard after a visible selection, use
+  OS-level input (`computer-use`, focused browser window, or Windows SendKeys `^c`). For paste, place
+  TSV into the OS clipboard first, then use OS-level `Ctrl+V`.
 - Undo a mistake: use `Control+Z` immediately, then re-read/re-screenshot before retrying.
 
 ## Verified Formatting Paths
