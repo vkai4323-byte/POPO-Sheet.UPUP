@@ -42,6 +42,10 @@ verified keyboard/clipboard fallback paths.
 13. Treat OS-level copy as unverified until the agent proves it created the selection itself. If the
     user is also working in POPO, do not use OS clipboard results as evidence unless a before/after
     screenshot proves the selected range.
+14. After every data fill or write, proactively check formatting without waiting for the user to ask.
+    Compare target row heights, column widths, wraps, merges, alignment, fills, font colors, borders,
+    and style ids against nearby reference rows/columns; fix safe differences and screenshot the
+    final rendered result when presentation matters.
 
 ## Default Workflow
 
@@ -62,7 +66,10 @@ Use this flow for filling, supplementing, cleaning, or formatting a POPO sheet:
 8. **Verify values:** use `verify:true`/`sheet_read` when available.
 9. **Match formatting:** apply inferred row height, column width, borders, wrap, alignment, and link
    style without waiting for a separate user reminder.
-10. **Final check:** screenshot the edited region and compare with nearby completed rows. Report data
+10. **Format self-check:** compare the target range against the nearest relevant reference format.
+    If simple differences are safe to fix, apply them before reporting completion; ask only when the
+    formatting choice would change business meaning or risk destructive edits.
+11. **Final check:** screenshot the edited region and compare with nearby completed rows. Report data
    filled, format matched, and any uncertainty.
 
 Ask only when two plausible interpretations would change business meaning or cause hard-to-reverse

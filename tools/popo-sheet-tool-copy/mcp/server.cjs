@@ -116,7 +116,7 @@ async function callWebBridge(action, args = {}, options = {}) {
 }
 
 async function maybeNavigate(input) {
-  if (!input.url) return null;
+  if (input.skipNavigate || !input.url) return null;
   return await callWebBridge(
     "navigate",
     {
@@ -126,6 +126,57 @@ async function maybeNavigate(input) {
     },
     input
   );
+}
+
+function makeWaitForOfficeIframeScript(timeoutMs) {
+  return `
+(async () => {
+  const timeoutMs = ${Number(timeoutMs) || 10000};
+  const deadline = Date.now() + timeoutMs;
+
+  function iframeSummary() {
+    return Array.from(document.querySelectorAll("iframe")).map((iframe, index) => ({
+      index,
+      src: iframe.src || "",
+      title: iframe.title || "",
+      width: iframe.clientWidth,
+      height: iframe.clientHeight,
+    }));
+  }
+
+  function findOfficeIframe() {
+    const frames = iframeSummary();
+    return frames.find((frame) => frame.src.includes("office.netease.com") && frame.src.includes("identity=")) ||
+      frames.find((frame) => frame.src.includes("office.netease.com")) ||
+      frames.find((frame) => frame.src.includes("identity="));
+  }
+
+  while (Date.now() < deadline) {
+    const match = findOfficeIframe();
+    if (match) {
+      return JSON.stringify({ ok: true, url: location.href, iframe: match, iframeCount: iframeSummary().length });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return JSON.stringify({ ok: false, url: location.href, iframeCount: iframeSummary().length, iframes: iframeSummary() });
+})()
+`;
+}
+
+async function waitForOfficeIframe(input) {
+  const call = await callWebBridge(
+    "evaluate",
+    { code: makeWaitForOfficeIframeScript(input.iframeTimeoutMs || 10000) },
+    input
+  );
+  const parsed = parseEvaluateString(call.data);
+  parsed.artifacts = parsed.artifacts || {};
+  parsed.artifacts.iframeWaitResponsePath = call.responsePath;
+  if (!parsed.ok) {
+    throw new Error(`No POPO office iframe found after wait: ${JSON.stringify(parsed)}`);
+  }
+  return parsed;
 }
 
 function parseEvaluateString(response) {
@@ -156,8 +207,27 @@ function makeSnapshotScript(options) {
   }
 
   async function fetchSnapshot() {
-    const iframe = document.querySelector("iframe");
-    if (!iframe) throw new Error("No POPO office iframe found");
+    function findOfficeIframe() {
+      const frames = Array.from(document.querySelectorAll("iframe")).map((iframe, index) => ({
+        iframe,
+        index,
+        src: iframe.src || "",
+        title: iframe.title || "",
+      }));
+      const match = frames.find((frame) => frame.src.includes("office.netease.com") && frame.src.includes("identity=")) ||
+        frames.find((frame) => frame.src.includes("office.netease.com")) ||
+        frames.find((frame) => frame.src.includes("identity="));
+      if (!match) {
+        throw new Error("No POPO office iframe found: " + JSON.stringify({
+          url: location.href,
+          iframeCount: frames.length,
+          iframes: frames.map((frame) => ({ index: frame.index, src: frame.src, title: frame.title })),
+        }));
+      }
+      return match.iframe;
+    }
+
+    const iframe = findOfficeIframe();
     const iframeUrl = new URL(iframe.src);
     const identity = iframeUrl.searchParams.get("identity");
     const source = iframeUrl.searchParams.get("from") || "POPO_DOC";
@@ -193,8 +263,83 @@ function makeSnapshotScript(options) {
   function compactCell(cell) {
     if (!cell) return null;
     const out = {};
-    for (const key of ["0", "1", "100", "101"]) {
+    for (const key of Object.keys(cell).sort()) {
       if (Object.prototype.hasOwnProperty.call(cell, key)) out[key] = cell[key];
+    }
+    return out;
+  }
+
+  function summarizeTabs(tabs) {
+    if (Array.isArray(tabs)) {
+      return tabs.map((tab, index) => ({
+        index,
+        id: String(tab.id ?? tab.sheetId ?? tab.name ?? index),
+        sheetId: String(tab.sheetId ?? tab.id ?? index),
+        name: String(tab.name ?? tab.title ?? tab.text ?? ""),
+        rawKeys: Object.keys(tab || {}).sort(),
+        rawPreview: Array.isArray(tab) ? tab.slice(0, 18) : Object.fromEntries(Object.entries(tab || {}).slice(0, 18)),
+      }));
+    }
+    if (tabs && typeof tabs === "object") {
+      return Object.entries(tabs).map(([id, tab]) => ({
+        id: String(id),
+        sheetId: String(tab.sheetId ?? tab.id ?? id),
+        name: String(tab.name ?? tab.title ?? tab.text ?? ""),
+        rawKeys: Object.keys(tab || {}).sort(),
+        rawPreview: Array.isArray(tab) ? tab.slice(0, 18) : Object.fromEntries(Object.entries(tab || {}).slice(0, 18)),
+      }));
+    }
+    return [];
+  }
+
+  function summarizeSheetMeta(sheets) {
+    return Object.fromEntries(Object.entries(sheets || {}).map(([id, sheet]) => {
+      const meta = {};
+      for (const [key, value] of Object.entries(sheet || {})) {
+        if (["cells", "rows", "cols"].includes(key)) continue;
+        if (value && typeof value === "object") {
+          meta[key] = Array.isArray(value)
+            ? value.slice(0, 20)
+            : Object.fromEntries(Object.entries(value).slice(0, 20));
+        } else {
+          meta[key] = value;
+        }
+      }
+      return [String(id), {
+        keys: Object.keys(sheet || {}).sort(),
+        name: String(sheet?.name ?? sheet?.title ?? sheet?.text ?? sheet?.["0"] ?? ""),
+        meta,
+      }];
+    }));
+  }
+
+  function summarizeStyleRoots(workbook, styleIds) {
+    const out = {};
+    const selectedStyleIds = (styleIds || []).map(Number).filter((id) => Number.isFinite(id));
+    for (const [key, value] of Object.entries(workbook || {})) {
+      if (!/style|format|theme|color|font|border|fill/i.test(key)) continue;
+      if (key === "styles" && value && typeof value === "object") {
+        const list = Array.isArray(value.list) ? value.list : [];
+        out[key] = {
+          type: "object",
+          keys: Object.keys(value).sort(),
+          listCount: list.length,
+          first: list.slice(0, 12),
+          selected: Object.fromEntries(selectedStyleIds.map((id) => [String(id), list[id] || null])),
+        };
+        continue;
+      }
+      if (value && typeof value === "object") {
+        out[key] = {
+          type: Array.isArray(value) ? "array" : "object",
+          count: Array.isArray(value) ? value.length : Object.keys(value).length,
+          sample: Array.isArray(value)
+            ? value.slice(0, 20)
+            : Object.fromEntries(Object.entries(value).slice(0, 20)),
+        };
+      } else {
+        out[key] = value;
+      }
     }
     return out;
   }
@@ -252,12 +397,35 @@ function makeSnapshotScript(options) {
     return obj;
   });
 
+  const sampleRowNumbers = Array.isArray(options.sampleRows)
+    ? options.sampleRows.map(Number)
+    : Array.from({ length: Number(options.sampleRows || 0) }, (_, idx) => idx + 1);
+  const sampleColIds = (options.sampleColIds || cols.slice(0, Number(options.sampleCols || 0))).map(String);
+  const sampleGrid = sampleRowNumbers.map((visualRow) => {
+    const rowId = String(rows[Number(visualRow) - 1]);
+    const obj = { visualRow, rowId, cells: {} };
+    for (const colId of sampleColIds) {
+      const visualCol = cols.findIndex((x) => String(x) === colId) + 1;
+      obj.cells[colId] = {
+        visualCol,
+        address: visualCol > 0 ? colLetters(visualCol) + String(visualRow) : null,
+        cell: compactCell(cells[rowId + "," + colId]),
+      };
+    }
+    return obj;
+  });
+
   return JSON.stringify({
     version,
     collectionID: got.begin.collectionID,
     docID: got.begin.docID,
     clientID: got.begin.clientID,
     sheetId,
+    rootKeys: Object.keys(workbook || {}).sort(),
+    styleRoots: options.includeStyleRoots ? summarizeStyleRoots(workbook, options.styleIds) : null,
+    tabs: summarizeTabs(workbook.tabs),
+    sheetKeys: Object.keys(workbook.sheets || {}),
+    sheetMeta: summarizeSheetMeta(workbook.sheets || {}),
     rowCount: rows.length,
     colCount: cols.length,
     cols: cols.slice(0, options.maxCols || 30).map((id, idx) => ({
@@ -267,6 +435,7 @@ function makeSnapshotScript(options) {
     })),
     found,
     rowSummaries,
+    sampleGrid,
   });
 })()
 `;
@@ -298,8 +467,27 @@ function makeWriteByNameScript(input) {
   }
 
   function makeWsUrl() {
-    const iframe = document.querySelector("iframe");
-    if (!iframe) throw new Error("No POPO office iframe found");
+    function findOfficeIframe() {
+      const frames = Array.from(document.querySelectorAll("iframe")).map((iframe, index) => ({
+        iframe,
+        index,
+        src: iframe.src || "",
+        title: iframe.title || "",
+      }));
+      const match = frames.find((frame) => frame.src.includes("office.netease.com") && frame.src.includes("identity=")) ||
+        frames.find((frame) => frame.src.includes("office.netease.com")) ||
+        frames.find((frame) => frame.src.includes("identity="));
+      if (!match) {
+        throw new Error("No POPO office iframe found: " + JSON.stringify({
+          url: location.href,
+          iframeCount: frames.length,
+          iframes: frames.map((frame) => ({ index: frame.index, src: frame.src, title: frame.title })),
+        }));
+      }
+      return match.iframe;
+    }
+
+    const iframe = findOfficeIframe();
     const iframeUrl = new URL(iframe.src);
     const identity = iframeUrl.searchParams.get("identity");
     const source = iframeUrl.searchParams.get("from") || "POPO_DOC";
@@ -474,8 +662,27 @@ function makeProbeWriteScript(input) {
 (async () => {
   const input = ${JSON.stringify(input || {})};
   function makeWsUrl() {
-    const iframe = document.querySelector("iframe");
-    if (!iframe) throw new Error("No POPO office iframe found");
+    function findOfficeIframe() {
+      const frames = Array.from(document.querySelectorAll("iframe")).map((iframe, index) => ({
+        iframe,
+        index,
+        src: iframe.src || "",
+        title: iframe.title || "",
+      }));
+      const match = frames.find((frame) => frame.src.includes("office.netease.com") && frame.src.includes("identity=")) ||
+        frames.find((frame) => frame.src.includes("office.netease.com")) ||
+        frames.find((frame) => frame.src.includes("identity="));
+      if (!match) {
+        throw new Error("No POPO office iframe found: " + JSON.stringify({
+          url: location.href,
+          iframeCount: frames.length,
+          iframes: frames.map((frame) => ({ index: frame.index, src: frame.src, title: frame.title })),
+        }));
+      }
+      return match.iframe;
+    }
+
+    const iframe = findOfficeIframe();
     const iframeUrl = new URL(iframe.src);
     const identity = iframeUrl.searchParams.get("identity");
     const source = iframeUrl.searchParams.get("from") || "POPO_DOC";
@@ -529,11 +736,280 @@ function makeProbeWriteScript(input) {
 `;
 }
 
+function makeApplyBasicFormatScript(input) {
+  return `
+(async () => {
+  const input = ${JSON.stringify(input || {})};
+
+  function findOfficeIframe() {
+    const frames = Array.from(document.querySelectorAll("iframe")).map((iframe, index) => ({
+      iframe,
+      index,
+      src: iframe.src || "",
+      title: iframe.title || "",
+    }));
+    const match = frames.find((frame) => frame.src.includes("office.netease.com") && frame.src.includes("identity=")) ||
+      frames.find((frame) => frame.src.includes("office.netease.com")) ||
+      frames.find((frame) => frame.src.includes("identity="));
+    if (!match) {
+      throw new Error("No POPO office iframe found: " + JSON.stringify({
+        url: location.href,
+        iframeCount: frames.length,
+        iframes: frames.map((frame) => ({ index: frame.index, src: frame.src, title: frame.title })),
+      }));
+    }
+    return match.iframe;
+  }
+
+  function makeWsUrl() {
+    const iframeUrl = new URL(findOfficeIframe().src);
+    const identity = iframeUrl.searchParams.get("identity");
+    const source = iframeUrl.searchParams.get("from") || "POPO_DOC";
+    const lang = iframeUrl.searchParams.get("popo_locale") || "zh-CN";
+    return iframeUrl.origin.replace("https", "wss") + "/node/?" +
+      new URLSearchParams({ identity, serverType: "GEZHI", source, wantCompress: "false", lang });
+  }
+
+  async function fetchSnapshot() {
+    const wsUrl = makeWsUrl();
+    return await new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => reject(new Error("snapshot timeout")), input.timeoutMs || 15000);
+      let begin = null;
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.begin) {
+          begin = msg;
+          ws.send(JSON.stringify({ a: "f", c: msg.collectionID, d: msg.docID }));
+        } else if (msg.a === "f") {
+          clearTimeout(timer);
+          ws.close();
+          resolve({ begin, fetch: msg });
+        }
+      };
+      ws.onerror = () => reject(new Error("snapshot websocket error"));
+    });
+  }
+
+  async function submitOp(version, op) {
+    const wsUrl = makeWsUrl();
+    return await new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => reject(new Error("op timeout")), input.timeoutMs || 15000);
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.begin) {
+          ws.send(JSON.stringify({
+            a: "op",
+            c: msg.collectionID,
+            d: msg.docID,
+            v: version,
+            op,
+            src: msg.clientID,
+            seq: 1,
+          }));
+        } else if (msg.a === "op") {
+          clearTimeout(timer);
+          ws.close();
+          resolve(msg);
+        }
+      };
+      ws.onerror = () => reject(new Error("op websocket error"));
+    });
+  }
+
+  function getAt(root, path) {
+    let node = root;
+    for (const part of path) {
+      if (!node || !Object.prototype.hasOwnProperty.call(node, part)) return { exists: false, value: undefined };
+      node = node[part];
+    }
+    return { exists: true, value: node };
+  }
+
+  function sameValue(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function pushSet(op, workbook, path, value) {
+    const old = getAt(workbook, path);
+    if (old.exists && sameValue(old.value, value)) return false;
+    const part = { p: path, oi: value };
+    if (old.exists) part.od = old.value;
+    op.push(part);
+    return true;
+  }
+
+  function normalizeRowId(sheet, item) {
+    if (item.rowId !== undefined && item.rowId !== null) return String(item.rowId);
+    if (item.visualRow === undefined || item.visualRow === null) throw new Error("rowId or visualRow is required");
+    const rowId = sheet.rows?.[Number(item.visualRow) - 1];
+    if (rowId === undefined) throw new Error("visualRow out of range: " + item.visualRow);
+    return String(rowId);
+  }
+
+  function normalizeColId(sheet, item) {
+    if (item.colId !== undefined && item.colId !== null) return String(item.colId);
+    if (item.visualCol === undefined || item.visualCol === null) throw new Error("colId or visualCol is required");
+    const colId = sheet.cols?.[Number(item.visualCol) - 1];
+    if (colId === undefined) throw new Error("visualCol out of range: " + item.visualCol);
+    return String(colId);
+  }
+
+  const sheetId = String(input.sheetId || "0");
+  const before = await fetchSnapshot();
+  const workbook = before.fetch.data.data;
+  const version = before.fetch.data.v;
+  const sheet = workbook.sheets[sheetId];
+  if (!sheet) throw new Error("Sheet not found: " + sheetId);
+
+  const base = ["sheets", sheetId];
+  const op = [];
+  const plan = {
+    rowHeights: [],
+    colWidths: [],
+    spans: [],
+    cells: [],
+  };
+
+  const rowHeights = input.rowHeights || [];
+  const colWidths = input.colWidths || [];
+  const spans = input.spans || [];
+  const cells = input.cells || input.cellWrites || [];
+
+  if (rowHeights.length) {
+    const map = {};
+    for (const item of rowHeights) {
+      const rowId = normalizeRowId(sheet, item);
+      map[rowId] = Number(item.height);
+      plan.rowHeights.push({ ...item, rowId, height: Number(item.height) });
+    }
+    if (sheet.rowHeights && typeof sheet.rowHeights === "object") {
+      for (const [rowId, height] of Object.entries(map)) pushSet(op, workbook, [...base, "rowHeights", rowId], height);
+    } else {
+      pushSet(op, workbook, [...base, "rowHeights"], map);
+    }
+  }
+
+  if (colWidths.length) {
+    const map = {};
+    for (const item of colWidths) {
+      const colId = normalizeColId(sheet, item);
+      map[colId] = Number(item.width);
+      plan.colWidths.push({ ...item, colId, width: Number(item.width) });
+    }
+    if (sheet.colWidths && typeof sheet.colWidths === "object") {
+      for (const [colId, width] of Object.entries(map)) pushSet(op, workbook, [...base, "colWidths", colId], width);
+    } else {
+      pushSet(op, workbook, [...base, "colWidths"], map);
+    }
+  }
+
+  if (spans.length) {
+    const map = {};
+    for (const item of spans) {
+      const rowId = normalizeRowId(sheet, item);
+      const colId = normalizeColId(sheet, item);
+      const key = rowId + "," + colId;
+      const value = [Number(item.rowSpan || 1), Number(item.colSpan || 1)];
+      map[key] = value;
+      plan.spans.push({ ...item, rowId, colId, key, value });
+    }
+    if (sheet.spans && typeof sheet.spans === "object") {
+      for (const [key, value] of Object.entries(map)) pushSet(op, workbook, [...base, "spans", key], value);
+    } else {
+      pushSet(op, workbook, [...base, "spans"], map);
+    }
+  }
+
+  if (cells.length) {
+    const map = {};
+    for (const item of cells) {
+      const rowId = normalizeRowId(sheet, item);
+      const colId = normalizeColId(sheet, item);
+      const key = rowId + "," + colId;
+      const oldCell = sheet.cells?.[key] || {};
+      const nextCell = item.cell ? { ...item.cell } : { ...oldCell };
+      if (Object.prototype.hasOwnProperty.call(item, "value")) nextCell["0"] = item.value;
+      if (Object.prototype.hasOwnProperty.call(item, "link")) nextCell["1"] = item.link;
+      if (Object.prototype.hasOwnProperty.call(item, "styleId")) nextCell["100"] = Number(item.styleId);
+      map[key] = nextCell;
+      plan.cells.push({ ...item, rowId, colId, key, expected: nextCell });
+    }
+    if (sheet.cells && typeof sheet.cells === "object") {
+      for (const [key, cell] of Object.entries(map)) pushSet(op, workbook, [...base, "cells", key], cell);
+    } else {
+      pushSet(op, workbook, [...base, "cells"], map);
+    }
+  }
+
+  if (input.dryRun !== false) {
+    return JSON.stringify({ ok: true, mode: "dryRun", version, opCount: op.length, plan });
+  }
+
+  let ack = null;
+  if (op.length) {
+    ack = await submitOp(version, op);
+    if (ack.error) return JSON.stringify({ ok: false, mode: "opError", version, ack, opCount: op.length, plan });
+  }
+
+  const after = await fetchSnapshot();
+  const afterSheet = after.fetch.data.data.sheets[sheetId];
+  const verification = {
+    rowHeights: plan.rowHeights.map((item) => ({
+      rowId: item.rowId,
+      visualRow: item.visualRow,
+      expected: item.height,
+      actual: afterSheet.rowHeights?.[item.rowId],
+      ok: afterSheet.rowHeights?.[item.rowId] === item.height,
+    })),
+    colWidths: plan.colWidths.map((item) => ({
+      colId: item.colId,
+      visualCol: item.visualCol,
+      expected: item.width,
+      actual: afterSheet.colWidths?.[item.colId],
+      ok: afterSheet.colWidths?.[item.colId] === item.width,
+    })),
+    spans: plan.spans.map((item) => ({
+      key: item.key,
+      expected: item.value,
+      actual: afterSheet.spans?.[item.key],
+      ok: sameValue(afterSheet.spans?.[item.key], item.value),
+    })),
+    cells: plan.cells.map((item) => {
+      const actual = afterSheet.cells?.[item.key] || {};
+      const checks = {};
+      if (Object.prototype.hasOwnProperty.call(item.expected, "0")) checks.value = actual["0"] === item.expected["0"];
+      if (Object.prototype.hasOwnProperty.call(item.expected, "1")) checks.link = actual["1"] === item.expected["1"];
+      if (Object.prototype.hasOwnProperty.call(item.expected, "100")) checks.styleId = actual["100"] === item.expected["100"];
+      return { key: item.key, expected: item.expected, actual, checks, ok: Object.values(checks).every(Boolean) };
+    }),
+  };
+  const ok = [...verification.rowHeights, ...verification.colWidths, ...verification.spans, ...verification.cells]
+    .every((item) => item.ok);
+
+  return JSON.stringify({
+    ok,
+    mode: op.length ? "written" : "unchanged",
+    versionBefore: version,
+    versionAfter: after.fetch.data.v,
+    ack,
+    opCount: op.length,
+    plan,
+    verification,
+    notes: ["Merged-cell visual rendering may require a page reload after ShareDB op writes."],
+  });
+})()
+`;
+}
+
 async function evaluateScript(input, code) {
   await maybeNavigate(input);
+  const iframe = input.waitForIframe === false ? null : await waitForOfficeIframe(input);
   const call = await callWebBridge("evaluate", { code }, input);
   const parsed = parseEvaluateString(call.data);
   parsed.artifacts = parsed.artifacts || {};
+  if (iframe) parsed.artifacts.iframeWaitResponsePath = iframe.artifacts.iframeWaitResponsePath;
   parsed.artifacts.evaluateResponsePath = call.responsePath;
   return parsed;
 }
@@ -547,6 +1023,11 @@ const toolDefinitions = [
       properties: {
         session: { type: "string" },
         url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
+        waitForIframe: { type: "boolean", default: true },
         sheetId: { type: "string", default: "0" },
         nameColId: { type: "string", default: "3" },
         names: { type: "array", items: { type: "string" } },
@@ -564,6 +1045,11 @@ const toolDefinitions = [
       properties: {
         session: { type: "string" },
         url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
+        waitForIframe: { type: "boolean", default: true },
         sheetId: { type: "string", default: "0" },
         nameColId: { type: "string", default: "3" },
         targetColIds: { type: "array", items: { type: "string" } },
@@ -581,6 +1067,11 @@ const toolDefinitions = [
       properties: {
         session: { type: "string" },
         url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
+        waitForIframe: { type: "boolean", default: true },
         artifactDir: { type: "string" }
       }
     }
@@ -593,6 +1084,11 @@ const toolDefinitions = [
       properties: {
         session: { type: "string" },
         url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
+        waitForIframe: { type: "boolean", default: true },
         sheetId: { type: "string", default: "0" },
         nameColId: { type: "string", default: "3" },
         targetColId: { type: "string" },
@@ -622,6 +1118,11 @@ const toolDefinitions = [
       properties: {
         session: { type: "string" },
         url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
+        waitForIframe: { type: "boolean", default: true },
         sheetId: { type: "string", default: "0" },
         nameColId: { type: "string", default: "3" },
         targetColId: { type: "string" },
@@ -637,12 +1138,91 @@ const toolDefinitions = [
     }
   },
   {
+    name: "popo_apply_basic_format",
+    description: "Apply verified POPO layout formatting: row heights, column widths, merged spans, cell text, and existing style ids.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        session: { type: "string" },
+        url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
+        waitForIframe: { type: "boolean", default: true },
+        sheetId: { type: "string", default: "0" },
+        rowHeights: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              visualRow: { type: "number" },
+              rowId: { type: "string" },
+              height: { type: "number" }
+            },
+            required: ["height"]
+          }
+        },
+        colWidths: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              visualCol: { type: "number" },
+              colId: { type: "string" },
+              width: { type: "number" }
+            },
+            required: ["width"]
+          }
+        },
+        spans: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              visualRow: { type: "number" },
+              visualCol: { type: "number" },
+              rowId: { type: "string" },
+              colId: { type: "string" },
+              rowSpan: { type: "number", default: 1 },
+              colSpan: { type: "number", default: 1 }
+            }
+          }
+        },
+        cells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              visualRow: { type: "number" },
+              visualCol: { type: "number" },
+              rowId: { type: "string" },
+              colId: { type: "string" },
+              value: { type: "string" },
+              link: { type: "string" },
+              styleId: { type: "number" },
+              cell: { type: "object" }
+            }
+          }
+        },
+        dryRun: { type: "boolean", default: true },
+        artifactDir: { type: "string" }
+      },
+      required: ["sheetId"]
+    }
+  },
+  {
     name: "popo_screenshot_checkpoint",
     description: "Capture a WebBridge screenshot and copy the returned temp image to a stable artifact path.",
     inputSchema: {
       type: "object",
       properties: {
         session: { type: "string" },
+        url: { type: "string" },
+        newTab: { type: "boolean" },
+        groupTitle: { type: "string" },
+        skipNavigate: { type: "boolean" },
+        iframeTimeoutMs: { type: "number" },
         artifactDir: { type: "string" },
         fileName: { type: "string" }
       }
@@ -673,8 +1253,12 @@ async function callTool(name, input) {
     };
     return result;
   }
+  if (name === "popo_apply_basic_format") {
+    return await evaluateScript(input, makeApplyBasicFormatScript(input));
+  }
   if (name === "popo_screenshot_checkpoint") {
     await maybeNavigate(input);
+    if (input.waitForIframe !== false) await waitForOfficeIframe(input);
     const screenshot = await callWebBridge("screenshot", { format: "png" }, input);
     if (!screenshot.data.ok || !screenshot.data.data || !screenshot.data.data.path) {
       throw new Error(`Screenshot failed: ${JSON.stringify(screenshot.data)}`);
