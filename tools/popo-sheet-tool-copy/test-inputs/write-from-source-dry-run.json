@@ -1,0 +1,15 @@
+{
+  "session": "popo-brf-repair",
+  "sheetId": "0",
+  "nameColId": "3",
+  "targetColId": "403791563974998",
+  "fields": [
+    "0",
+    "1"
+  ],
+  "sourcePath": "./test-inputs/brf-source.tsv",
+  "sourceNameColumn": "name",
+  "sourceValueColumn": "brf",
+  "dryRun": true,
+  "artifactDir": "./artifacts/live-source-dry-run"
+}

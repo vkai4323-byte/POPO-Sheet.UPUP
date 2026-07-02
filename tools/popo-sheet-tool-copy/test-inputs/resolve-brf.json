@@ -1,0 +1,13 @@
+{
+  "session": "popo-brf-repair",
+  "sheetId": "0",
+  "nameColId": "3",
+  "targetColIds": [
+    "403791563974998"
+  ],
+  "names": [
+    "我杀猪了",
+    "糖醋里脊本脊"
+  ],
+  "artifactDir": "./artifacts/live-resolve"
+}

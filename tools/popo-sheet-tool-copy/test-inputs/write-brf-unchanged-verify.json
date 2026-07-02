@@ -1,0 +1,22 @@
+{
+  "session": "popo-brf-repair",
+  "sheetId": "0",
+  "nameColId": "3",
+  "targetColId": "403791563974998",
+  "fields": [
+    "0",
+    "1"
+  ],
+  "dryRun": false,
+  "edits": [
+    {
+      "name": "我杀猪了",
+      "value": "https://zcn4d68k5gjz.feishu.cn/wiki/H9pgwbrAfiaA3ykvO7LceCcVnSf"
+    },
+    {
+      "name": "糖醋里脊本脊",
+      "value": "https://zcn4d68k5gjz.feishu.cn/wiki/KC89w6a93iGCIvkFUVlcV24Pn2c"
+    }
+  ],
+  "artifactDir": "./artifacts/live-unchanged-verify"
+}
