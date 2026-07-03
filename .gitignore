@@ -1,0 +1,23 @@
+# Runtime artifacts
+artifacts/
+tools/popo-sheet-automation/artifacts/
+.tmp/
+tmp/
+
+# Generated paste/report files
+paste.tsv
+match_report.tsv
+*.response.json
+
+# Local editor and OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Node dependency/cache folders
+node_modules/

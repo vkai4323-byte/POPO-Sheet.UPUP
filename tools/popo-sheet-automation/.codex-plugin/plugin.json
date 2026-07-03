@@ -1,0 +1,34 @@
+{
+  "name": "popo-sheet-automation",
+  "version": "0.1.0",
+  "description": "POPO Sheet automation tools for reading, collecting source content, writing matched data, formatting, and verifying NetEase POPO spreadsheets.",
+  "author": {
+    "name": "vkai4323-byte"
+  },
+  "license": "UNLICENSED",
+  "keywords": [
+    "popo",
+    "spreadsheet",
+    "webbridge",
+    "sharedb"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "POPO Sheet Automation",
+    "shortDescription": "Read, fill, format, and verify POPO sheets",
+    "longDescription": "A POPO Sheet automation tool for understanding live NetEase POPO spreadsheets, collecting or normalizing source content, writing matched text/link data, applying basic formatting, and verifying results through ShareDB snapshots.",
+    "developerName": "vkai4323-byte",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Read this POPO sheet and identify the target columns",
+      "Collect the needed source data and fill matching rows",
+      "Format the filled range and verify the result"
+    ]
+  }
+}

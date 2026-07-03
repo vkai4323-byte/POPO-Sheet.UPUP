@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "popoSheetAutomation": {
+      "title": "POPO Sheet Automation",
+      "description": "POPO Sheet automation tools for reading, filling, formatting, and verifying NetEase POPO spreadsheets.",
+      "cwd": "./tools/popo-sheet-automation",
+      "command": "node",
+      "args": [
+        "./mcp/server.cjs",
+        "--stdio"
+      ]
+    }
+  }
+}

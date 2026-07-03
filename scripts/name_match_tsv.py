@@ -61,12 +61,20 @@ def parse_delimited(text: str, delimiter: str) -> list[dict[str, str]]:
 
 def parse_table(path: str) -> list[dict[str, str]]:
     text = read_text(path)
+    if not text.strip():
+        raise SystemExit(f"Input table is empty: {path}")
     md_rows = parse_markdown_table(text)
     if md_rows:
         return md_rows
     if "\t" in text.splitlines()[0]:
         return parse_delimited(text, "\t")
     return parse_delimited(text, ",")
+
+
+def ensure_output_parent(path: str) -> None:
+    parent = Path(path).parent
+    if parent != Path("."):
+        parent.mkdir(parents=True, exist_ok=True)
 
 
 def find_col(rows: list[dict[str, str]], requested: str | None, candidates: tuple[str, ...] = NAME_CANDIDATES) -> str:
@@ -231,6 +239,9 @@ def main() -> int:
                 "status": "source_only",
                 "target_values": "",
             })
+
+    ensure_output_parent(args.out_paste)
+    ensure_output_parent(args.out_report)
 
     with Path(args.out_paste).open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh, delimiter="\t", lineterminator="\n")

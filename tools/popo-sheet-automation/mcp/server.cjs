@@ -1332,7 +1332,7 @@ async function handleMcpRequest(request) {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "popo-sheet-tool-copy", version: "0.1.0" },
+        serverInfo: { name: "popo-sheet-automation", version: "0.1.0" },
       },
     });
     return;
