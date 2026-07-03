@@ -1,33 +1,44 @@
 # POPO Sheet Tool Copy
 
-Isolated experimental tool project for POPO Sheet automation. This folder is intentionally separate
-from the installed `popo-sheet` skill so tool work can be implemented and verified without polluting
-the existing skill package.
+这是 POPO Sheet 自动化能力的 MCP/plugin 工具。agent 的主入口是
+`skills/popo-sheet-tool-copy/SKILL.md`，它负责把“理解需求 -> 读取 POPO -> 搜集/整理来源内容 -> 写入 -> 格式整理 -> 验证”串成一个简洁流程。
 
-## Scope
+## 范围
 
-- Read POPO workbook data through the verified ShareDB snapshot path.
-- Resolve internal `rowId,colId` cells by in-sheet names.
-- Write simple text/link cells through the verified ShareDB JSON0 op path.
-- Apply basic layout formatting through verified ShareDB JSON0 ops: row heights, column widths,
-  merged spans, cell text, and existing style ids.
-- Verify writes through a fresh snapshot, not repeated scroll screenshots.
-- Save WebBridge responses and screenshots as stable diagnostic artifacts.
-- Provide a thin routing skill that tells Codex when and how to call the MCP tools.
+- 通过 ShareDB snapshot 读取 POPO workbook。
+- 将用户提供的文件、页面、URL 或搜索结果整理成可写入的来源表。
+- 按表格内名字解析内部 `rowId,colId`。
+- 通过 ShareDB JSON0 op 写入简单文本/链接单元格。
+- 应用基础格式：行高、列宽、合并单元格、单元格文本和已有 style id。
+- 写入后用 fresh snapshot 验证，而不是依赖滚动截图。
+- 保存 WebBridge 响应和截图为诊断 artifact。
 
-## Skill + Tool Relationship
+## 目录
 
-This project is designed to use both:
+- `.codex-plugin/plugin.json`: plugin 元信息。
+- `.mcp.json`: 从本目录启动 MCP server 的配置。
+- `mcp/server.cjs`: MCP server 和 CLI 入口。
+- `skills/popo-sheet-tool-copy/SKILL.md`: agent 使用本工具的主引导入口。
+- `test-inputs/`: 可复用的 CLI 调试输入。
+- `docs/verification.md`: 实机验证记录和已知边界。
 
-- The Skill (`skills/popo-sheet-tool-copy/SKILL.md`) is the routing and safety layer. It tells Codex
-  which tool to call, when to dry-run, and when to stop.
-- The MCP server (`mcp/server.cjs`) is the execution layer. It performs WebBridge calls, ShareDB
-  snapshot reads, JSON0 writes, matching, and verification.
+## 本地验证
 
-The tools can still be run directly from the CLI for testing, but the intended Codex experience is:
-the skill triggers, then the agent calls the MCP tools instead of rewriting fragile scripts.
+使用 Codex 自带 Node.js runtime：
 
-## Tools
+```powershell
+$node = "C:\Users\Admin\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+& $node .\mcp\server.cjs --list-tools
+& $node --check .\mcp\server.cjs
+```
+
+调用工具时，优先用 `@file.json` 传参，避免 Windows shell 转义问题：
+
+```powershell
+& $node .\mcp\server.cjs --call popo_write_from_source_file '@.\test-inputs\write-from-source-dry-run.json'
+```
+
+## 可用工具
 
 - `popo_get_snapshot_summary`
 - `popo_resolve_by_name`
@@ -37,34 +48,6 @@ the skill triggers, then the agent calls the MCP tools instead of rewriting frag
 - `popo_apply_basic_format`
 - `popo_screenshot_checkpoint`
 
-## Direct Test Mode
+## 验证原则
 
-Use the bundled Node.js runtime:
-
-```powershell
-$node = "C:\Users\Admin\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-& $node .\mcp\server.cjs --list-tools
-& $node .\mcp\server.cjs --call popo_probe_write_channel '{"session":"popo-brf-repair"}'
-```
-
-For Windows-safe JSON arguments, use `@file.json`:
-
-```powershell
-& $node .\mcp\server.cjs --call popo_write_from_source_file '@.\test-inputs\write-from-source-dry-run.json'
-```
-
-## MCP Mode
-
-The MCP config is in `.mcp.json`. This copy is not installed into a marketplace yet.
-
-## Verification Rule
-
-For data correctness, prefer ShareDB snapshot verification. Screenshots are diagnostic and
-presentation evidence only.
-
-For visual formatting, use both:
-
-- snapshot verification for structural state such as `rowHeights`, `colWidths`, `spans`, and
-  cell style ids;
-- screenshot verification for rendered appearance. Merged-cell rendering may require a page reload
-  after a ShareDB op.
+数据正确性优先用 ShareDB snapshot 验证。截图只作为 UI fallback、故障诊断和视觉格式证据。

@@ -1,75 +1,94 @@
 ---
 name: popo-sheet-tool-copy
-description: Use with the POPO Sheet Tool Copy MCP tools for NetEase POPO / office.netease.com spreadsheets. Trigger when a user asks to read, resolve, verify, bulk fill, write POPO sheet cells by names or columns, or apply basic layout formatting such as row height, column width, merged cells, fills, font colors, and alignment by reusing existing style ids.
+description: Use this POPO Sheet automation tool for NetEase POPO / office.netease.com spreadsheets. Trigger when the user wants an agent to understand a POPO sheet, collect or normalize source content, fill cells by names/columns, write links or text, apply row/column/layout formatting, and verify the result through the bundled MCP tools.
 ---
 
-# POPO Sheet Tool Copy
+# POPO Sheet Automation Tool
 
-Use this thin routing skill with the `popoSheetToolCopy` MCP server. The skill decides which tool to
-call and enforces safety boundaries; the MCP tools do the fragile WebBridge, ShareDB, matching,
-writing, verification, and diagnostic artifact work.
+Use this skill as the single routing layer for the `popoSheetToolCopy` MCP server. The goal is a
+fast, compact, end-to-end flow: understand the user's task, read the live POPO sheet, gather or
+normalize source content, write the matched data, clean up formatting, and verify before reporting.
 
-## Tool-First Rules
+## Operating Contract
 
-1. Prefer MCP tools over hand-written WebBridge scripts when the task is covered by a tool.
-2. Do not use repeated scroll-and-screenshot loops for row lookup or value verification. Use
-   ShareDB snapshot/copy-back through the tools.
-3. Verify data through a fresh snapshot before reporting success. Screenshots are for UI fallback,
-   visual formatting, failure diagnosis, or final presentation proof.
-4. For writes, match by in-sheet names or explicit internal ids. Do not trust external row numbers as
-   POPO row positions.
-5. Use `dryRun:true` for batch writes first. Proceed to write only when the plan has no missing or
-   duplicate-name conflicts.
-6. After every value fill/write, self-check formatting against the closest relevant reference rows or
-   columns. Do not wait for the user to ask for format checking. Fix safe row height, column width,
-   merge, fill, font color, alignment, border, wrap, and style-id mismatches before reporting done.
+1. Prefer MCP tools over ad hoc WebBridge scripts whenever the task is covered by a tool.
+2. Read the sheet before writing. Infer sheet title, headers, target columns, existing values,
+   editable state, and nearby formatting from snapshot evidence when possible.
+3. Match rows by in-sheet names or explicit internal ids. Never treat external/source row numbers as
+   POPO visual row positions.
+4. If source content is incomplete, collect it from the user's provided files, visible browser pages,
+   accessible URLs, or search results when the user asks for external collection. Normalize collected
+   content into a small TSV/CSV/Markdown table before writing.
+5. Dry-run batch writes first. Continue only when each intended row resolves exactly once and the
+   plan targets the expected columns.
+6. Verify written data through a fresh snapshot. Use screenshots for UI fallback, failure diagnosis,
+   final visual proof, and formatting checks.
+7. After every fill/write, compare formatting against the nearest relevant reference rows or columns.
+   Fix safe differences in row height, column width, merges, fill, font color, alignment, borders,
+   wrap, and style ids before reporting done.
+8. Stop immediately on duplicate-name conflicts, protected/read-only warnings, stale clipboard,
+   shifted paste, unexpected missing rows, or unknown POPO cell schemas.
+
+## End-To-End Workflow
+
+1. **Understand the request.** Identify the desired output columns, row matching key, source fields,
+   formatting expectations, and whether external content collection is required.
+2. **Open or reuse the POPO document.** Confirm the active tab/sheet, editability, and target region.
+3. **Inspect the workbook.** Use `popo_get_snapshot_summary` for sheet structure, headers, sample
+   rows, selected names, and nearby style evidence.
+4. **Collect and normalize source content.** Use local files first. If the user asks for information
+   gathering, browse/search the requested sources, extract only the needed fields, and save/prepare a
+   compact source table.
+5. **Resolve targets.** Use snapshot evidence to map headers to internal column ids and names to
+   internal row ids. Use `popo_resolve_by_name` when names and target columns are known.
+6. **Probe writes.** Use `popo_probe_write_channel` before the first real write in a document/session.
+7. **Plan the write.** Use `popo_write_from_source_file` or `popo_write_by_name` with `dryRun:true`.
+   Inspect missing, duplicate, source-only, unchanged, and planned-changed rows.
+8. **Write.** Run the same tool with `dryRun:false` only after the plan is clean or the user has
+   explicitly accepted conflicts/skips.
+9. **Format.** Use `popo_apply_basic_format` when snapshot evidence can safely clone nearby style
+   ids, row heights, column widths, merges, or text layout.
+10. **Verify and summarize.** Trust success only after fresh snapshot verification. Add a screenshot
+    checkpoint when visual formatting matters, then report changed rows/columns and any skipped or
+    uncertain items.
 
 ## Tool Routing
 
-- Use `popo_get_snapshot_summary` to inspect workbook/sheet structure, compact rows, columns, and
-  selected names.
-- Use `popo_resolve_by_name` when the user gives names and target columns and you need internal
-  row ids, visual addresses, or current values.
-- Use `popo_probe_write_channel` before the first write in a POPO document/session. It sends an
-  empty op and should not change data.
-- Use `popo_write_by_name` for direct JSON edits supplied in the prompt or generated by the agent.
-- Use `popo_write_from_source_file` for batch fills from local TSV, CSV, or Markdown tables.
-- Use `popo_apply_basic_format` for verified basic formatting: row heights, column widths, merged
-  spans, cell text, and existing style ids. Use snapshot evidence to pick the target sheet, rows,
-  columns, and reference style ids before writing.
-- Use `popo_screenshot_checkpoint` only for stable diagnostic screenshots. Trust the returned temp
-  path and copied artifact path, not a requested custom screenshot path.
+- `popo_get_snapshot_summary`: inspect workbook/sheet structure, compact rows, columns, styles,
+  sample cells, selected names, and nearby formatting.
+- `popo_resolve_by_name`: resolve in-sheet names to row ids, visual addresses, and current target
+  values.
+- `popo_probe_write_channel`: send an empty ShareDB op before the first write in a session.
+- `popo_write_by_name`: write direct text/link edits generated by the agent.
+- `popo_write_from_source_file`: write batch values from local TSV, CSV, or Markdown source tables.
+- `popo_apply_basic_format`: apply verified row heights, column widths, merged spans, cell text, and
+  existing style ids.
+- `popo_screenshot_checkpoint`: capture stable diagnostic or final screenshots; trust the returned
+  temp path and copied artifact path.
 
-## Batch Workflow
+## Source Collection Rules
 
-1. Resolve target columns and name column from snapshot evidence.
-2. Run `popo_write_from_source_file` or `popo_write_by_name` with `dryRun:true`.
-3. Inspect the returned plan:
-   - every intended name resolves exactly once,
-   - target addresses and current values look right,
-   - `opCount` matches the expected number of changed fields.
-4. Run the same write with `dryRun:false`.
-5. Trust data success only when the returned verification rows have `ok:true`.
-6. Run a format self-check: compare target styles, row heights, column widths, merges, and rendered
-   screenshot against the nearest reference format. Apply `popo_apply_basic_format` for safe fixes.
+- Keep collected source data small and auditable: one row per target entity, one column per field to
+  fill.
+- Preserve URLs exactly. Normalize display text separately from link targets when both are needed.
+- Record missing values as blanks only when blanks should remain blank; otherwise keep them out of
+  the write plan and report them.
+- For web collection, cite or retain source URLs in the local notes/table when the data may need
+  review.
+- Do not invent values. If a field cannot be found, leave the target unchanged and report it.
 
-## Basic Formatting Workflow
+## Formatting Rules
 
-1. Use `popo_get_snapshot_summary` with `sampleRows`, `sampleCols`, `includeStyleRoots:true`, and
-   relevant `styleIds` to inspect nearby reference formats.
-2. Choose existing style ids from the same workbook instead of inventing style objects on the first
-   pass.
-3. Run `popo_apply_basic_format` with `dryRun:true`.
-4. Run with `dryRun:false` only after the plan targets the expected visual rows/columns or internal
-   ids.
-5. Verify structural state from the returned snapshot verification. Then use
-   `popo_screenshot_checkpoint` for rendered appearance.
-6. If merged cells are written through ShareDB and do not visually update immediately, reload the
-   page once and screenshot again.
+- Prefer existing style ids from the same workbook over constructing new style objects.
+- Use the closest completed row/column in the same section as the reference.
+- Data correctness comes before visual polish; however, do not report complete until obvious safe
+  formatting mismatches are fixed or explicitly called out.
+- Merged-cell rendering may require a page reload after ShareDB ops; verify with screenshot when the
+  visual result matters.
 
 ## Boundaries
 
-The current verified write paths cover simple text/link cell values and basic formatting through
-existing style ids, row heights, column widths, and merged spans. Do not use them for formulas,
-protected ranges, structural row/column insertion/deletion, dropdown/tag schema edits, or unknown
-POPO cell schemas without a separate live validation.
+The verified write paths cover simple text/link cell values and basic formatting through existing
+style ids, row heights, column widths, and merged spans. Do not use them for formulas, protected
+ranges, structural row/column insertion/deletion, dropdown/tag schema edits, or unknown POPO cell
+schemas without separate live validation or explicit user approval.

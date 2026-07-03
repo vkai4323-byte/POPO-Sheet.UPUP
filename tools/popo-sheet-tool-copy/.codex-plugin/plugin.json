@@ -1,9 +1,9 @@
 {
   "name": "popo-sheet-tool-copy",
   "version": "0.1.0",
-  "description": "Experimental POPO Sheet MCP tools backed by Kimi WebBridge and ShareDB snapshot/op flows.",
+  "description": "POPO Sheet automation tools for reading, collecting source content, writing matched data, formatting, and verifying NetEase POPO spreadsheets.",
   "author": {
-    "name": "Local Codex"
+    "name": "vkai4323-byte"
   },
   "license": "UNLICENSED",
   "keywords": [
@@ -15,10 +15,10 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "POPO Sheet Tool Copy",
-    "shortDescription": "Experimental verified POPO Sheet read/write tools",
-    "longDescription": "A local isolated MCP tool copy for reading, matching, writing, and verifying NetEase POPO online spreadsheets via Kimi WebBridge and ShareDB.",
-    "developerName": "Local Codex",
+    "displayName": "POPO Sheet Automation",
+    "shortDescription": "Read, fill, format, and verify POPO sheets",
+    "longDescription": "A POPO Sheet automation tool for understanding live NetEase POPO spreadsheets, collecting or normalizing source content, writing matched text/link data, applying basic formatting, and verifying results through ShareDB snapshots.",
+    "developerName": "vkai4323-byte",
     "category": "Productivity",
     "capabilities": [
       "Read",
@@ -26,9 +26,9 @@
       "Interactive"
     ],
     "defaultPrompt": [
-      "Read a POPO sheet by snapshot",
-      "Write POPO cells by matched names",
-      "Verify POPO cell values"
+      "Read this POPO sheet and identify the target columns",
+      "Collect the needed source data and fill matching rows",
+      "Format the filled range and verify the result"
     ]
   }
 }
