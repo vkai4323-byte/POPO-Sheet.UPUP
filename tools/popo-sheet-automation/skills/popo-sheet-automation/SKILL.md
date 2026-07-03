@@ -1,11 +1,11 @@
 ---
-name: popo-sheet-tool-copy
+name: popo-sheet-automation
 description: Use this POPO Sheet automation tool for NetEase POPO / office.netease.com spreadsheets. Trigger when the user wants an agent to understand a POPO sheet, collect or normalize source content, fill cells by names/columns, write links or text, apply row/column/layout formatting, and verify the result through the bundled MCP tools.
 ---
 
 # POPO Sheet Automation Tool
 
-Use this skill as the single routing layer for the `popoSheetToolCopy` MCP server. The goal is a
+Use this skill as the single routing layer for the `popoSheetAutomation` MCP server. The goal is a
 fast, compact, end-to-end flow: understand the user's task, read the live POPO sheet, gather or
 normalize source content, write the matched data, clean up formatting, and verify before reporting.
 

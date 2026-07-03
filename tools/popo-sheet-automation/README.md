@@ -1,7 +1,7 @@
-# POPO Sheet Tool Copy
+# POPO Sheet Automation
 
 这是 POPO Sheet 自动化能力的 MCP/plugin 工具。agent 的主入口是
-`skills/popo-sheet-tool-copy/SKILL.md`，它负责把“理解需求 -> 读取 POPO -> 搜集/整理来源内容 -> 写入 -> 格式整理 -> 验证”串成一个简洁流程。
+`skills/popo-sheet-automation/SKILL.md`，它负责把“理解需求 -> 读取 POPO -> 搜集/整理来源内容 -> 写入 -> 格式整理 -> 验证”串成一个简洁流程。
 
 ## 范围
 
@@ -18,7 +18,7 @@
 - `.codex-plugin/plugin.json`: plugin 元信息。
 - `.mcp.json`: 从本目录启动 MCP server 的配置。
 - `mcp/server.cjs`: MCP server 和 CLI 入口。
-- `skills/popo-sheet-tool-copy/SKILL.md`: agent 使用本工具的主引导入口。
+- `skills/popo-sheet-automation/SKILL.md`: agent 使用本工具的主引导入口。
 - `test-inputs/`: 可复用的 CLI 调试输入。
 - `docs/verification.md`: 实机验证记录和已知边界。
 

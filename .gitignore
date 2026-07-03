@@ -1,6 +1,6 @@
 # Runtime artifacts
 artifacts/
-tools/popo-sheet-tool-copy/artifacts/
+tools/popo-sheet-automation/artifacts/
 .tmp/
 tmp/
 

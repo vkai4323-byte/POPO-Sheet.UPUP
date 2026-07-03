@@ -1,5 +1,5 @@
 {
-  "name": "popo-sheet-tool-copy",
+  "name": "popo-sheet-automation",
   "version": "0.1.0",
   "description": "POPO Sheet automation tools for reading, collecting source content, writing matched data, formatting, and verifying NetEase POPO spreadsheets.",
   "author": {

@@ -1,6 +1,6 @@
 # Verification Log
 
-This file records live validation for the isolated POPO Sheet tool copy.
+This file records live validation for the POPO Sheet Automation tool.
 
 ## Expected Live Test Target
 
@@ -21,7 +21,7 @@ Validated on 2026-07-02 with bundled Node.js `v24.14.0`.
 - `node --check mcp/server.cjs`: passed.
 - `node mcp/server.cjs --list-tools`: returned 7 tools after adding `popo_apply_basic_format`.
 - MCP stdio smoke test:
-  - `initialize`: returned server info `popo-sheet-tool-copy@0.1.0`.
+  - `initialize`: returned server info `popo-sheet-automation@0.1.0`.
   - `tools/list`: returned all 7 tool schemas, including `popo_apply_basic_format`.
 
 ### Live WebBridge / POPO
@@ -139,5 +139,5 @@ applying hand-picked colors.
 - This validation avoids repeated scroll screenshots. Data correctness is verified structurally.
 - The write channel was probed with an empty op to avoid unnecessary data mutation.
 - Actual changed-value write behavior was previously validated manually in the same POPO document;
-  this isolated tool copy verified its own matching, planning, no-op safety, and fresh snapshot
+  this POPO Sheet Automation tool verified its own matching, planning, no-op safety, and fresh snapshot
   verification path.

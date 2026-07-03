@@ -14,11 +14,11 @@
 
 ## 文件结构
 
-- `tools/popo-sheet-tool-copy/skills/popo-sheet-tool-copy/SKILL.md`: agent 使用这个 Tool 时的主引导入口。
+- `tools/popo-sheet-automation/skills/popo-sheet-automation/SKILL.md`: agent 使用这个 Tool 时的主引导入口。
 - `references/popo-sheet-reference.md`: POPO 内部结构、失败模式、键盘/剪贴板 fallback 和格式检查细节。
 - `scripts/name_match_tsv.py`: 根据源数据和 POPO 复制 TSV 生成粘贴块与匹配报告。
-- `.mcp.json`: 根目录 MCP 配置，指向隔离的工具副本。
-- `tools/popo-sheet-tool-copy/`: 可安装/可调试的 MCP/plugin 工具，包含 skill、MCP server、测试输入和验证记录。
+- `.mcp.json`: 根目录 MCP 配置，指向 POPO Sheet Automation 工具。
+- `tools/popo-sheet-automation/`: 可安装/可调试的 MCP/plugin 工具，包含 skill、MCP server、测试输入和验证记录。
 
 ## 快速验证
 
@@ -29,8 +29,8 @@ $python = "C:\Users\Admin\.cache\codex-runtimes\codex-primary-runtime\dependenci
 $node = "C:\Users\Admin\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
 
 & $python .\scripts\name_match_tsv.py --help
-& $node --check .\tools\popo-sheet-tool-copy\mcp\server.cjs
-& $node .\tools\popo-sheet-tool-copy\mcp\server.cjs --list-tools
+& $node --check .\tools\popo-sheet-automation\mcp\server.cjs
+& $node .\tools\popo-sheet-automation\mcp\server.cjs --list-tools
 ```
 
 如果 PowerShell 里中文显示成乱码，通常是终端输出编码问题，文件本身是 UTF-8。可以用：
@@ -43,8 +43,8 @@ Get-Content -Encoding UTF8 README.md
 
 当前只把一个入口交给 agent：
 
-- skill 入口：`tools/popo-sheet-tool-copy/skills/popo-sheet-tool-copy/SKILL.md`
-- MCP server：`tools/popo-sheet-tool-copy/mcp/server.cjs`
+- skill 入口：`tools/popo-sheet-automation/skills/popo-sheet-automation/SKILL.md`
+- MCP server：`tools/popo-sheet-automation/mcp/server.cjs`
 - MCP 配置：根目录 `.mcp.json` 或工具目录 `.mcp.json`
 
 根目录不再维护并列的主 `SKILL.md`，避免 agent 在两个规则源之间摇摆；当前仓库只保留工具目录内的 agent skill。
@@ -59,7 +59,7 @@ Get-Content -Encoding UTF8 README.md
 - `popo_apply_basic_format`
 - `popo_screenshot_checkpoint`
 
-实机验证记录和当前边界见 `tools/popo-sheet-tool-copy/docs/verification.md`。
+实机验证记录和当前边界见 `tools/popo-sheet-automation/docs/verification.md`。
 
 ## GitHub CLI
 
